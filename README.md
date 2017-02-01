@@ -12,128 +12,149 @@ This example demonstrates how to use Go to deploy an Azure Resource Manager Temp
 
 - [Run this sample](#run)
   - [ParamaterLink instructions](#paramlink)
-- [What does deployTemplateExample.go do?](#sample)
+- [What does example.go do?](#sample)
 - [More information](#info)
 
 <a id="run"></a>
+
 ## Run this sample
 
-1. Create a [service principal](https://azure.microsoft.com/documentation/articles/resource-group-authenticate-service-principal-cli/). You will need the Tenant ID, Client ID and Client Secret for [authentication](https://github.com/Azure/azure-sdk-for-go/tree/master/arm#first-a-sidenote-authentication-and-the-azure-resource-manager), so keep them as soon as you get them.
-2. Get your Azure Subscription ID using either of the methods mentioned below:
-  - Get it through the [portal](portal.azure.com) in the subscriptions section.
-  - Get it using the [Azure CLI](https://azure.microsoft.com/documentation/articles/xplat-cli-install/) with command `azure account show`.
-  - Get it using [Azure Powershell](https://azure.microsoft.com/documentation/articles/powershell-install-configure/) whit cmdlet `Get-AzureRmSubscription`.
-3. Set environment variables `AZURE_TENANT_ID = <TENANT_ID>`, `AZURE_CLIENT_ID = <CLIENT_ID>`, `AZURE_CLIENT_SECRET = <CLIENT_SECRET>` and `AZURE_SUBSCRIPTION_ID = <SUBSCRIPTION_ID>`.
-4. Get this sample using command `go get -u github.com/Azure-Samples/resource-manager-go-template-deployment`.
-5. Get the [Azure SDK for Go](https://github.com/Azure/azure-sdk-for-go) using command `go get -u github.com/Azure/azure-sdk-for-go`. Or in case that you want to vendor your dependencies using [glide](https://github.com/Masterminds/glide), navigate to this sample's directory and use command `glide install`
-6. Compile and run the sample.
+1. If you don't already have it, [install Go 1.7](https://golang.org/dl/).
+
+1. Clone the repository.
+
+    ```
+    git clone https://github.com:Azure-Samples/virtual-machines-go-manage.git
+    ```
+
+1. Install the dependencies using glide.
+
+    ```
+    cd virtual-machines-go-manage
+    glide install
+    ```
+
+1. Create an Azure service principal either through
+    [Azure CLI](https://azure.microsoft.com/documentation/articles/resource-group-authenticate-service-principal-cli/),
+    [PowerShell](https://azure.microsoft.com/documentation/articles/resource-group-authenticate-service-principal/)
+    or [the portal](https://azure.microsoft.com/documentation/articles/resource-group-create-service-principal-portal/).
+
+1. Set the following environment variables using the information from the service principle that you created.
+
+    ```
+    export AZURE_TENANT_ID={your tenant id}
+    export AZURE_CLIENT_ID={your client id}
+    export AZURE_CLIENT_SECRET={your client secret}
+    export AZURE_SUBSCRIPTION_ID={your subscription id}
+    ```
+
+    > [AZURE.NOTE] On Windows, use `set` instead of `export`.
+
+1. Run the sample.
+
+    ```
+    go run example.go
+    ```
+
 
 <a id="paramlink"></a>
+
 ### ParamaterLink instructions
 
 1. Create an [Azure Key Vault](https://azure.microsoft.com/documentation/articles/key-vault-manage-with-cli/) using the [Azure CLI](https://azure.microsoft.com/documentation/articles/xplat-cli-install/) `azure keyvault create --vault-name templateSampleVault --resource-group MyResourceGroup --location westus`
-2. Add the public SSH as secret in the vault `azure keyvault secret set --vault-name templateSampleVault --secret-name sshKeyData --value "yourPublicSSHkey"`
-3. Reference correctly the [Key Vault in the parameter file](https://azure.microsoft.com/documentation/articles/resource-manager-keyvault-parameter/). In vmDeploymentParameter.json, replace subscription_id, resource_group and vault_name inside the "id" value with the correct values.
+
+1. Add the public SSH as secret in the vault using the Azure CLI
+
+	```
+	azure keyvault secret set --vault-name templateSampleVault --secret-name sshKeyData --value "yourPublicSSHkey"
+	```	
+
+1. Reference correctly the [Key Vault in the parameter file](https://azure.microsoft.com/documentation/articles/resource-manager-keyvault-parameter/). In vmDeploymentParameter.json, replace subscription_id, resource_group and vault_name inside the "id" value with the correct values.
 
 <a id="sample"></a>
-## What does deployTemplateExample.go do?
 
-First, the sample gets an authentication token using your Azure credentials. This token will be included in all clients (GroupsClient and DeploymentsClient).
-
-```go
-	credentials := map[string]string{
-		"AZURE_CLIENT_ID":       os.Getenv("AZURE_CLIENT_ID"),
-		"AZURE_CLIENT_SECRET":   os.Getenv("AZURE_CLIENT_SECRET"),
-		"AZURE_SUBSCRIPTION_ID": os.Getenv("AZURE_SUBSCRIPTION_ID"),
-		"AZURE_TENANT_ID":       os.Getenv("AZURE_TENANT_ID")}
-	if err := checkEnvVar(&credentials); err != nil {
-		return err
-	}
-	oauthConfig, err := azure.PublicCloud.OAuthConfigForTenant(credentials["AZURE_TENANT_ID"])
-	if err != nil {
-		return err
-	}
-	token, err := azure.NewServicePrincipalToken(*oauthConfig, credentials["AZURE_CLIENT_ID"], credentials["AZURE_CLIENT_SECRET"], azure.PublicCloud.ResourceManagerEndpoint)
-	if err != nil {
-		return err
-	}
-```
+## What does example.go do?
 
 A rescorce group is needed to be able to deploy a template.
 
 ```go
-	groupClient := resources.NewGroupsClient(credentials["AZURE_SUBSCRIPTION_ID"])
-	groupClient.Authorizer = token
-	location := "westus"
-	var resourceGroupParameters = resources.ResourceGroup{
-		Location: &location}
-	if _, err = groupClient.CreateOrUpdate(resourceGroupName, resourceGroupParameters); err != nil {
-		return err
+	resourceGroupParameters := resources.ResourceGroup{
+		Location: to.StringPtr(location),
 	}
+	_, err := groupsClient.CreateOrUpdate(groupName, resourceGroupParameters)
 ```
 
 The sample then gets the template and its parameters. Both template and parameters can be set with a `*map[string]interface{}` or with a link to a json file.
 
 ```go
-template, err := parseJSONFromFile("vmDeploymentTemplate.json")
-	if err != nil {
-		return err
+	deployment := resources.Deployment{
+		Properties: &resources.DeploymentProperties{
+			Mode: resources.Incremental,
+		},
 	}
 
-	//TemplateLink
-	/*
-		templateURI := "https://raw.githubusercontent.com/Azure-Samples/resource-manager-go-template-deployment/master/vmDeploymentTemplate.json"
-		var templateLink = resources.TemplateLink{
-			URI:            &templateURI,
-			ContentVersion: nil}
-	*/
-
-  parameter := map[string]interface{}{}
-	// The paramaters map must have this format {key: {"value": value}}.
-	addElementToMap(&parameter, "dnsLabelPrefix", dnsPrefix)
-	addElementToMap(&parameter, "vmName", "azure-deployment-sample-vm")
-	sshKey, err := getSSHkey(&sshKeyPath)
-	if err != nil {
-		return err
+	fmt.Println("\tGet template")
+	if useTemplateLink {
+		fmt.Println("\tUsing template link")
+		deployment.Properties.TemplateLink = &resources.TemplateLink{
+			URI:            to.StringPtr("https://raw.githubusercontent.com/Azure-Samples/resource-manager-go-template-deployment/master/vmDeploymentTemplate.json"),
+			ContentVersion: to.StringPtr("1.0.0.0"),
+		}
+	} else {
+		fmt.Println("\tUsing local template")
+		template, err := parseJSONFromFile("vmDeploymentTemplate.json")
+		onErrorFail(err, "parseJSONFromFile failed")
+		deployment.Properties.Template = template
 	}
-	addElementToMap(&parameter, "sshKeyData", sshKey)
 
-	// ParameterLink
-	/*
-		parameterURI := "https://raw.githubusercontent.com/Azure-Samples/resource-manager-go-template-deployment/master/vmDeploymentParameter.json"
-		var parameterLink = resources.ParametersLink{
-			URI:            &parameterURI,
-			ContentVersion: nil}
-	*/
+	fmt.Println("\tGet parameters")
+	if useParameterLink {
+		fmt.Println("\tUsing parameter link")
+		deployment.Properties.ParametersLink = &resources.ParametersLink{
+			URI:            to.StringPtr("https://raw.githubusercontent.com/Azure-Samples/resource-manager-go-template-deployment/master/vmDeploymentParameter.json"),
+			ContentVersion: to.StringPtr("1.0.0.0"),
+		}
+	} else {
+		fmt.Println("\tUsing local parameters")
+		parameter := map[string]interface{}{}
+		// The paramaters map must have this format {key: {"value": value}}.
+		addElementToMap(&parameter, "dnsLabelPrefix", dnsPrefix)
+		addElementToMap(&parameter, "vmName", "azure-deployment-sample-vm")
+		sshKey, err := getSSHkey(sshKeyPath)
+		onErrorFail(err, "getSSHkey failed")
+		addElementToMap(&parameter, "sshKeyData", sshKey)
+		deployment.Properties.Parameters = &parameter
+	}
+```
 
-	// Set the template or templateLink, and parameters or parametersLink to use.
-	var properties = resources.DeploymentProperties{
-		Template:       template,
-		TemplateLink:   nil,
-		Parameters:     &parameter,
-		ParametersLink: nil,
-		Mode:           resources.Incremental}
-	var parameters = resources.Deployment{
-		Properties: &properties}
+The template is validated...
+
+```go
+	validate, err := deploymentsClient.Validate(groupName, deploymentName, deployment)
+	onErrorFail(err, "Validate failed")
+	if validate.Error == nil {
+		fmt.Println("Deployment is validated! Template is syntactically correct")
+	} else {
+		printValidationError(validate)
+		os.Exit(1)
+	}
 ```
 
 Finally, the template is deployed!
 
 ```go
-deploymentsClient := resources.NewDeploymentsClient(credentials["AZURE_SUBSCRIPTION_ID"])
-deploymentsClient.Authorizer = token
-if _, err = deploymentsClient.CreateOrUpdate(resourceGroupName, "azure-sample", parameters, nil); err != nil {
-	return err
-}
+	_, err := deploymentsClient.CreateOrUpdate(groupName, deploymentName, deployment, nil)
 ```
 
 <a id="info"></a>
+
 ## More information
 
 - [Azure Resource Manager overview - Template deployment](https://azure.microsoft.com/documentation/articles/resource-group-overview/#template-deployment)
 - [Create a template deployment](https://msdn.microsoft.com/library/azure/dn790564.aspx)
 - [Resource Manager template walkthrough](https://azure.microsoft.com/documentation/articles/resource-manager-template-walkthrough/)
 - [Pass secure values during deployment](https://azure.microsoft.com/documentation/articles/resource-manager-keyvault-parameter/)
+- [Using linked templates with Azure Resource Manager](https://docs.microsoft.com/en-us/azure/azure-resource-manager/resource-group-linked-templates)
 
 ***
 
