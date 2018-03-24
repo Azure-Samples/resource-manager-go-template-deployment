@@ -4,7 +4,7 @@ platforms: go
 author: mcardosos
 ---
 
-#Deploy an SSH Enabled VM with a Template in Go
+# Deploy an SSH Enabled VM with a Template in Go
 
 > This sample has been migrated to a different repo.
 
